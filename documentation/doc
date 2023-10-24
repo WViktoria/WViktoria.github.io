@@ -1,1 +1,331 @@
-This is for testing purposes.
+# Devops Eins: Project Documentation
+
+
+
+## About the app
+
+
+
+
+
+## Data Persistence
+
+**Models**
+
+The application uses four entities to function: User, Role, TemporaryKey and Bookmark.
+
+1. User
+
+- Attributes:
+
+  - `id`: Unique identifier.
+  - `username`, `password` and `email` : The user account's details.
+  - `enabled`, `isDeleted`: Booleans indicating whether the user's email has been verified, and whether the account is deleted.
+  - `keycode`: A generated keycode used for user validation and password change.
+  - `roles`: List of Roles assigned to the user.
+  - `bookmarks`: A list of Bookmarks created by the user.
+
+  
+
+2. Role
+
+Roles are used by Spring Security for authorization, and some pages and actions are only available to certain roles. By default, the application has two roles: USER and ADMIN.
+
+- Attributes:
+
+  - `id`: Unique identifier.
+  - `roleName`: The name of the role.
+  - `users`: List of users associated with the role. 
+
+  
+
+3. TemporaryKey
+
+Temporary keys are 48 character long, randomly generated strings assigned to the user after registration, and when a password reset is requested. After completing a certain action (validating the account or changing the password) the temporary key is removed.
+
+- Attributes:
+
+  - `id`: Unique identifier.
+  - `keycode`: A randomly generated keycode for user verification and password change.
+  - `createdAt`, `expiredAt`: Timestamps of the creation date, and the date until which the keycode is valid.
+  - `user`: The user to whom the keycode is assigned to.
+
+  
+
+4. Bookmark
+
+- Attributes:
+  - `id`: Unique identifier.
+  - `url` ,`short_url`: The URL of the bookmark, and a shorter version of it (optional).
+  - `title` , `description`: The displayed title and description of the bookmark.
+  - `createdAt` , `updatedAt`: The timestamp of creation and the last update (if any).
+  - `owner`: The user that created this bookmark.
+  - `isDeleted`: A boolean indicating whether the bookmark is deleted.
+
+
+
+**Database**
+
+* For storing data, the application uses a version 8 MySQL database.
+
+* Each entity has its own table, and each entry has a unique id which is used as the primary key of the table, and a secondary key in any table it has a relation with.
+
+* Data is stored as plaintext, with the passwords being the exceptions, which are first encrypted, then their encrypted value is stored in the database for safety.
+
+  
+
+*picture of the user table* 
+
+
+
+There are three types of relations within the database that reflect the relations between the entities:
+
+- User to Bookmark (One-to-Many).
+- User to TemporaryKey (One-to-One).
+- Role to User (Many-to-Many).
+
+
+
+**Migration**
+
+For migration, Flyway is being used. 
+
+* The Flyway scripts are stored in the db.migration folder under resources, and are serialized and named in the order of execution (V1, V2, V3...).
+
+* These scripts create the tables in the specified database as soon as the application is first run.
+
+  ```mysql
+  CREATE TABLE IF NOT EXISTS `users`
+  (
+      `id`         bigint       NOT NULL AUTO_INCREMENT,
+      `email`      varchar(128) NOT NULL UNIQUE,
+      `enabled`    boolean DEFAULT NULL,
+      `password`   varchar(255) NOT NULL,
+      `username`   varchar(32)  NOT NULL UNIQUE,
+      `keycode_id` bigint  DEFAULT NULL,
+      PRIMARY KEY (`id`),
+      FOREIGN KEY (`keycode_id`) REFERENCES `temporary_keys` (`id`)
+  );
+  ```
+
+* Then, data is being inserted into the created tables, such as the Roles users can have.
+
+  ```mysql
+  INSERT INTO users(username, email, password, enabled)
+  VALUES ('katie', 'ka@ti.e', '$2a$10$hrLpL7MjZiRjqZL3TIiThOqpYn3z1Yy1Le2/URbv2rQ2dEs0FvPXS', true),
+         ('peter', 'pe@te.r', '$2a$10$oz/jHg60GVwVqId0yZnbwukh7CACHTKsDIPuVhqffcMmCCsOWedIy', true),
+         ('simon', 'si@mo.n', '$2a$10$QPzBGiLN5HYgwr2UN/Rm5eS89cYQaWtvDOO11NMyCEz/d9VelDDpW', false);
+  ```
+
+
+
+
+
+## REST API
+
+After a successful login, a JWT token will be created for the user and sent to the client. This token is then used for authentication, and for allowing access to the application's pages.
+
+The JWT token has an expiry date, after which it will be no longer valid and a new one will be needed for further access.
+Additionally, some endpoins in the Rest API are only accessible to users with the role ADMIN. These endpoints will be collected in an Admin only segment for clarity.
+
+
+
+* **GET /api/hello**
+  * Used to test the connection to the application.
+  * Required fields: none
+
+
+
+**All logged in users:**
+
+* **POST /api/register**
+
+  * Registers an user if the username and email aren't yet taken, and if the password is strong enough (8 characters, contains a special character and a number)
+
+  * Required fields: JSON body
+
+    ```json
+    {
+      "username": "username",
+      "password": "password",
+      "email": "email"
+    }
+    ```
+
+    
+
+* **GET /api/confirm/{keycode}**
+
+  * Using the keycode sent to the user's e-mail address, the user's account will be validated and the keycode will be deleted.
+  * Required fields: Path variable (keycode)
+
+  
+
+* **POST /api/login**
+
+  * Attempts to log in into the user's account; if the credentials are correct, the user will be logged in and a JWT token will be created.
+
+  * Required fields: JSON body
+
+    ```json
+    {
+      "loginDetail": "username",
+      "password": "password"
+    }
+    ```
+
+
+
+* **POST /reset**
+
+  * Requests a password reset for given username/email. A keycode is then sent to the user's email address.
+
+  * Required fields: JSON body
+
+    ```json
+    {
+        "emailOrUsername":"emailOrUsername"
+    }
+    ```
+
+    
+
+* **POST /reset/{keycode}**
+
+  * Using the reset code sent to the user's email address in the url and the new password set in the request, the user's password will be changed.
+
+  * Required fields: JSON body
+
+    ```json
+    {
+        "newPassword":"newPassword"
+    }
+    ```
+
+
+
+**Admin only:**
+
+* **GET /api/users?page={page}&itemCount={count}**
+
+  * Lists all of the users in the database with pagination.
+
+  * Required fields: Query string, page (the page of the results, starts with 1) and count (the number of items on each page)
+
+    
+
+* **GET /api/users/{id}**
+
+  * Shows the given user, if one exists by the id used in the url
+  * Required fields: Path variable (user id)
+
+  
+
+* **POST /api/users**
+
+  * Registers an user if the username and email aren't yet taken, and if the password is strong enough (8 characters, contains a special character and a number)
+
+  * In the case of this registration method, the user will be immediately validated and a keycode won't be sent.
+
+  * Required fields: JSON body
+
+    ```json
+    {
+      "username": "username",
+      "password": "password",
+      "email": "email"
+    }
+    ```
+
+    
+
+* **PATCH /api/users/{id}**
+
+  * Updates the user details belonging to the user of a specific id
+
+  * The updates will not happen if there's another user with the same email and/or username already exists in the database, or if the password isn't strong enough (8 characters, contains a special character and a number)
+
+  * Required fields: Path variable (user id), JSON body
+
+    ```json
+    {
+      "username": "newUsername",
+      "password": "newPassword",
+      "email": "newEmail"
+    }
+    ```
+
+    
+
+* **DELETE /api/users/{id}**
+
+  * Deletes the user (using a soft delete, that sets the isDeleted boolean to true) with the specific ID, if one exists
+
+  * Required fields: Path variable (user id)
+
+    
+
+* **GET /api/strings?page={page}&itemCount={count}**
+
+  * Returns all the strings in the application along with their translations with pagination
+
+  * Required fields: Query string, page (the page of the results, starts with 1) and count (the number of items on each page)
+
+    
+
+
+
+## Containerization 
+
+
+
+
+
+## Infrastructure
+
+The application is deployed on AWS. The setup consists of are three **EC2 instances**:
+
+* Dev or Develop
+  * This instance is used for alpha testing.
+* Stag or Staging
+  * This instance is used for beta testing.
+* Prod or Production
+  * This instance is used for the final product, ready to be used.
+
+All three are t2.micro instances operating on Linux / UNIX and have elastic IPs assigned to them.
+
+
+
+For each EC2 instance, there should be an **RDS instance**. 
+
+This way each environment can have its own database, keeping the data used by alpha and beta testers separate, as well as keeping any data used for testing separate from real data used by the production, and the users of the application.
+
+The databases are set up as the following:
+
+* Engine type: MySQL
+* The database uses the free tier, and therefore it's only deployed to a single AZ (availability zone). 
+* The instance should be db.t2.micro
+* For storage, 20 GiB of General Purpose SSD (gp2) should be used
+* The database server should be set to private, only allowing access to the EC2 instance connected to it.
+  * The EC2 instance can be configured during the initial setup, or added after creation.
+  * It is important to note that the RDS and EC2 instances need to be in the same region or else they'll be unable to communicate.
+  * When connecting to an EC2 instance during initial setup, a security group will automatically be created to allow connection between the instances. Additional security groups can be selected or created as well for any other rules.
+
+
+
+It is important that the inbound and outbound rules of the EC2 and RDS allow communication between the two. Should there be an issue connecting to the database, it's important to check whether this connection is correctly set up before moving on to investigating other causes.
+
+
+
+A **Load balancer** should be set up, which can either be one of Amazon's load balancing services, or, alternatively, can be custom made. For our application, we've used a custom load balancer made by Szabolcs Milán. 
+
+- Expand on this later!
+
+
+
+**Terraform** should be used to make setting the infrastructure up faster and easier through automatization.
+
+Terraform scripts should be created with the end product in mind; these should usually be tested on Dev / Development, and if they work correctly, the already made scripts can be used to replicate the exact same setup in a fast and simple manner in other environments such as Staging for the next step of testing. 
+
+- Expand on this later, with example scripts!
+
